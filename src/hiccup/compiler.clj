@@ -3,7 +3,6 @@
   (:require [hiccup.util :as util]
             [clojure.string :as str])
   (:import [clojure.lang IPersistentVector ISeq Named]
-           [java.util Iterator]
            [hiccup.util RawString]))
 
 (defn- xml-mode? []
@@ -23,11 +22,8 @@
 (defn- end-tag []
   (if (xml-mode?) " />" ">"))
 
-(defn iterate! [callback coll]
-  (when coll
-    (let [^Iterator iterator (.iterator ^Iterable coll)]
-      (while (.hasNext iterator)
-        (callback (.next iterator))))))
+(defn string-builder [f coll]
+  (reduce (fn [acc x] (str acc (f x))) "" coll))
 
 (defn- concatenate-strings [coll]
   (->> coll
@@ -46,24 +42,24 @@
           (if (string? arg)
             arg
             `(str (or ~arg ""))))
-      `(let [~w (StringBuilder.)]
+      `(str
          ~@(map (fn [arg]
                   (if (string? arg)
-                    `(.append ~w ~arg)
-                    `(.append ~w (or ~arg ""))))
-                strs)
-         (.toString ~w)))))
+                    arg
+                    `(or ~arg "")))
+                strs)))))
+         
+(defn string-builder [f coll]
+  (reduce (fn [acc x] (str acc (f x))) "" coll))
 
 (defn- render-style-map [value]
-  (let [sb (StringBuilder.)]
-    (iterate!
-     (fn [[k v]]
-       (.append sb (util/to-str k))
-       (.append sb ":")
-       (.append sb (util/to-str v))
-       (.append sb ";"))
-     (sort-by #(util/to-str (key %)) value))
-    (.toString sb)))
+  (string-builder 
+   (fn [[k v]]
+      (str (util/to-str k)
+           ":"
+           (util/to-str v)
+           ";")) 
+   (sort-by #(util/to-str (key %)) value)))
 
 (defn- render-attr-value [value]
   (cond
@@ -94,10 +90,7 @@
   [attrs]
   (if (= {} attrs)
     ""
-    (let [sb (StringBuilder.)]
-      (iterate! #(.append sb (render-attribute %))
-                (sort-by #(util/to-str (key %)) attrs))
-      (.toString sb))))
+    (string-builder #(render-attribute %) (sort-by #(util/to-str (key %)) attrs))))
 
 (def ^{:doc "A list of elements that must be rendered without a closing tag."
        :private true}
@@ -200,9 +193,7 @@
     (render-element this))
   ISeq
   (render-html [this]
-    (let [sb (StringBuilder.)]
-      (iterate! #(.append sb (render-html %)) this)
-      (.toString sb)))
+    (string-builder #(render-html %) this))
   RawString
   (render-html [this]
     (str this))
@@ -246,9 +237,7 @@
 
 (defmethod compile-form "for"
   [[_ bindings body]]
-  `(let [sb# (StringBuilder.)]
-     (iterate! #(.append sb# %) (for ~bindings ~(compile-html body)))
-     (.toString sb#)))
+  `(reduce str "" (for ~bindings ~(compile-html body))))
 
 (defmethod compile-form "if"
   [[_ condition & body]]
